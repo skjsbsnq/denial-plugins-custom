@@ -1,0 +1,17 @@
+.dart_tool/
+build/
+.flutter-plugins*
+pubspec_overrides.yaml
+pubspec.lock
+.vscode/settings.json
+
+# Local upstream checkout and machine-specific tooling.
+/upstream/
+/.agents/
+/.codex/
+/.aws/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
