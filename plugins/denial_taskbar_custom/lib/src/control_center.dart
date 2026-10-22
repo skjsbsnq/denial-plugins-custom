@@ -25,6 +25,7 @@ import 'volume_presentation.dart';
 import 'anchored_menu_expansion.dart';
 import 'control_center_reveal.dart';
 import 'panel_motion.dart';
+import 'popup_focus_feedback.dart';
 
 enum _TaskbarPopupKind { controls, battery, clock, network }
 
@@ -167,59 +168,70 @@ class _ControlCenterButtonState extends ConsumerState<ControlCenterButton>
     final services = ShellServicesScope.of(context);
     final bounds = ref.watch(services.monitorBounds(widget.monitorId));
     final chinese = Localizations.localeOf(context).languageCode == 'zh';
+    final keyboardFocus = ref.watch(popupFocusFeedbackProvider);
     final battery = widget.battery ? ref.watch(batteryProvider) : null;
     return OverlayPortal.overlayChildLayoutBuilder(
       controller: _portal,
       overlayChildBuilder: (context, layout) =>
           _buildPopup(context, layout, bounds),
-      child: SizedBox(
-        width: widget.buttonChild != null ? null : 40,
-        child: Semantics(
-          expanded: _open,
-          child: widget.buttonChild != null
-              ? TextButton(
-                  focusNode: _focus,
-                  onPressed: _toggle,
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: context.shellTheme.borderRadius(4),
+      child: Listener(
+        onPointerDown: (_) =>
+            ref.read(popupFocusFeedbackProvider.notifier).pointerInteraction(),
+        child: SizedBox(
+          width: widget.buttonChild != null ? null : 40,
+          child: Semantics(
+            expanded: _open,
+            child: widget.buttonChild != null
+                ? TextButton(
+                    focusNode: _focus,
+                    onPressed: _toggle,
+                    style: popupButtonFocusStyle(
+                      TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: context.shellTheme.borderRadius(4),
+                        ),
+                      ),
+                      keyboard: keyboardFocus,
+                    ),
+                    child: widget.buttonChild!,
+                  )
+                : IconButton(
+                    focusNode: _focus,
+                    tooltip: widget.battery
+                        ? '${chinese ? '电池' : 'Battery'} ${battery?.capacity == null ? '—' : '${battery!.capacity}%'}'
+                        : (chinese ? '控制中心' : 'Control center'),
+                    onPressed: _toggle,
+                    style: popupButtonFocusStyle(
+                      IconButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        overlayColor: taskbarForeground(context)
+                            .withValues(alpha: 0.10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: context.shellTheme.borderRadius(4),
+                        ),
+                      ),
+                      keyboard: keyboardFocus,
+                    ),
+                    icon: Icon(
+                      widget.battery
+                          ? (battery?.charging == true
+                                ? Icons.battery_charging_full_rounded
+                                : battery?.capacity == null
+                                ? Icons.battery_unknown_rounded
+                                : battery!.capacity! <= 20
+                                ? Icons.battery_1_bar_rounded
+                                : battery.capacity! <= 50
+                                ? Icons.battery_3_bar_rounded
+                                : battery.capacity! <= 80
+                                ? Icons.battery_5_bar_rounded
+                                : Icons.battery_full_rounded)
+                          : Icons.tune_rounded,
+                      color: taskbarForeground(context),
+                      size: 22,
                     ),
                   ),
-                  child: widget.buttonChild!,
-                )
-              : IconButton(
-                  focusNode: _focus,
-                  tooltip: widget.battery
-                      ? '${chinese ? '电池' : 'Battery'} ${battery?.capacity == null ? '—' : '${battery!.capacity}%'}'
-                      : (chinese ? '控制中心' : 'Control center'),
-                  onPressed: _toggle,
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.transparent,
-                    overlayColor: taskbarForeground(context)
-                        .withValues(alpha: 0.10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: context.shellTheme.borderRadius(4),
-                    ),
-                  ),
-                  icon: Icon(
-                    widget.battery
-                        ? (battery?.charging == true
-                              ? Icons.battery_charging_full_rounded
-                              : battery?.capacity == null
-                              ? Icons.battery_unknown_rounded
-                              : battery!.capacity! <= 20
-                              ? Icons.battery_1_bar_rounded
-                              : battery.capacity! <= 50
-                              ? Icons.battery_3_bar_rounded
-                              : battery.capacity! <= 80
-                              ? Icons.battery_5_bar_rounded
-                              : Icons.battery_full_rounded)
-                        : Icons.tune_rounded,
-                    color: taskbarForeground(context),
-                    size: 22,
-                  ),
-                ),
+          ),
         ),
       ),
     );
@@ -247,101 +259,106 @@ class _ControlCenterButtonState extends ConsumerState<ControlCenterButton>
     final travel = ref.watch(
       shellSettingsProvider.select((s) => s.animations.panelTravel),
     );
-    return ShellInputRegion(
-      debugLabel: widget.network
-          ? 'Custom network card'
-          : widget.clock
-          ? 'Custom clock card'
-          : widget.battery
-          ? 'Custom battery card'
-          : 'Custom control center',
-      active: _open,
-      pointerPolicy: ShellPointerPolicy.fullScene,
-      keyboardPolicy: _open
-          ? ShellKeyboardPolicy.capture
-          : ShellKeyboardPolicy.none,
-      child: IgnorePointer(
-        ignoring: !_open,
-        child: ExcludeSemantics(
-          excluding: !_open,
-          child: Shortcuts(
-            shortcuts: const {
-              SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
-            },
-            child: Actions(
-              actions: {
-                DismissIntent: CallbackAction<DismissIntent>(
-                  onInvoke: (_) {
-                    unawaited(_close());
-                    return null;
-                  },
-                ),
+    return Listener(
+      onPointerDown: (_) =>
+          ref.read(popupFocusFeedbackProvider.notifier).pointerInteraction(),
+      child: ShellInputRegion(
+        debugLabel: widget.network
+            ? 'Custom network card'
+            : widget.clock
+            ? 'Custom clock card'
+            : widget.battery
+            ? 'Custom battery card'
+            : 'Custom control center',
+        active: _open,
+        pointerPolicy: ShellPointerPolicy.fullScene,
+        keyboardPolicy: _open
+            ? ShellKeyboardPolicy.capture
+            : ShellKeyboardPolicy.none,
+        child: IgnorePointer(
+          ignoring: !_open,
+          child: ExcludeSemantics(
+            excluding: !_open,
+            child: Shortcuts(
+              shortcuts: const {
+                SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
               },
-              child: FocusScope(
-                autofocus: true,
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: Listener(
-                        behavior: HitTestBehavior.opaque,
-                        onPointerDown: (_) =>
-                            unawaited(_close(restoreFocus: false)),
-                        child: const ColoredBox(color: Colors.transparent),
+              child: Actions(
+                actions: {
+                  DismissIntent: CallbackAction<DismissIntent>(
+                    onInvoke: (_) {
+                      unawaited(_close());
+                      return null;
+                    },
+                  ),
+                },
+                child: FocusScope(
+                  autofocus: true,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: (_) =>
+                              unawaited(_close(restoreFocus: false)),
+                          child: const ColoredBox(color: Colors.transparent),
+                        ),
                       ),
-                    ),
-                    // Clip panel travel to this monitor, including on multi-output desktops.
-                    Positioned.fromRect(
-                      rect: output,
-                      child: ClipRect(
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              right: output.right - placement.right,
-                              bottom: output.bottom - placement.bottom,
-                              width: placement.width,
-                              child: ControlCenterReveal(
-                                progress: _progress,
-                                travel: travel,
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxHeight: placement.maxHeight,
-                                  ),
-                                  child: Theme(
-                                    data: context.shellTheme.toMaterialTheme(),
-                                    child: PixelAlignedPanel(
-                                      devicePixelRatio:
-                                          MediaQuery.devicePixelRatioOf(
-                                            context,
-                                          ),
-                                      child: widget.network
-                                          ? NetworkPanel(
-                                              onClose: () =>
-                                                  unawaited(_close()),
-                                            )
-                                          : widget.clock
-                                          ? ClockPanel(
-                                              onClose: () =>
-                                                  unawaited(_close()),
-                                            )
-                                          : widget.battery
-                                          ? BatteryPanel(
-                                              onClose: () =>
-                                                  unawaited(_close()),
-                                            )
-                                          : _ControlCenterPanel(
-                                              monitorId: widget.monitorId,
-                                              onClose: () => _close(),
+                      // Clip panel travel to this monitor, including on multi-output desktops.
+                      Positioned.fromRect(
+                        rect: output,
+                        child: ClipRect(
+                          child: Stack(
+                            children: [
+                              Positioned(
+                                right: output.right - placement.right,
+                                bottom: output.bottom - placement.bottom,
+                                width: placement.width,
+                                child: ControlCenterReveal(
+                                  progress: _progress,
+                                  travel: travel,
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxHeight: placement.maxHeight,
+                                    ),
+                                    child: Theme(
+                                      data: context.shellTheme
+                                          .toMaterialTheme(),
+                                      child: PixelAlignedPanel(
+                                        devicePixelRatio:
+                                            MediaQuery.devicePixelRatioOf(
+                                              context,
                                             ),
+                                        child: widget.network
+                                            ? NetworkPanel(
+                                                onClose: () =>
+                                                    unawaited(_close()),
+                                              )
+                                            : widget.clock
+                                            ? ClockPanel(
+                                                onClose: () =>
+                                                    unawaited(_close()),
+                                              )
+                                            : widget.battery
+                                            ? BatteryPanel(
+                                                onClose: () =>
+                                                    unawaited(_close()),
+                                              )
+                                            : _ControlCenterPanel(
+                                                monitorId: widget.monitorId,
+                                                onClose: () => _close(),
+                                              ),
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
