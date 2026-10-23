@@ -12,6 +12,7 @@ import 'control_center.dart';
 import 'window_buttons.dart';
 import 'neutral_color.dart';
 import 'network_speed_indicator.dart';
+import 'taskbar_icon_viewport.dart';
 
 /// A continuous desktop panel. Native window surfaces remain host-owned.
 class WindowsTaskbar extends StatelessWidget {
@@ -72,84 +73,106 @@ class _TaskbarSurface extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     return ShellInputRegion(
       debugLabel: 'Taskbar',
-      child: _TaskbarBackdrop(
-        child: Material(
-          color: context.shellTheme.panelColor(colors.surfaceContainer),
-          surfaceTintColor: Colors.transparent,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: colors.outlineVariant)),
-            ),
-            child: FocusTraversalGroup(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 4, 12, 4),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        // Keep controls reachable on narrow outputs and with large text.
-                        final clockWidth =
-                            (106 * MediaQuery.textScalerOf(context).scale(1))
-                                .clamp(106.0, 190.0);
-                        final networkWidth = networkSpeedIndicatorWidth(
-                          context,
-                        );
-                        final stripWidth = (clockWidth + networkWidth + 304)
-                            .clamp(constraints.maxWidth, double.infinity);
-                        return SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            width: stripWidth,
-                            height: constraints.maxHeight,
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: WindowButtons(
-                                    monitorId: monitorId,
-                                    centerX: stripWidth / 2 + 2,
-                                    launcher: const _StartButton(),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                TaskbarTray(monitorId: monitorId),
-                                SizedBox(
-                                  width: networkWidth,
-                                  child: ControlCenterButton.network(
-                                    monitorId: monitorId,
-                                    child: const NetworkSpeedIndicator(),
-                                  ),
-                                ),
-                                ControlCenterButton(monitorId: monitorId),
-                                ControlCenterButton.battery(
-                                  monitorId: monitorId,
-                                ),
-                                SizedBox(
-                                  width: clockWidth,
-                                  child: ControlCenterButton.clock(
-                                    monitorId: monitorId,
-                                    child: const _Clock(),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
+      child: Stack(
+        fit: StackFit.expand,
+        clipBehavior: Clip.none,
+        children: [
+          IgnorePointer(
+            child: _TaskbarBackdrop(
+              child: Material(
+                color: context.shellTheme.panelColor(colors.surfaceContainer),
+                surfaceTintColor: Colors.transparent,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(color: colors.outlineVariant),
                     ),
                   ),
-                  const Positioned(
-                    top: 0,
-                    bottom: 0,
-                    right: 0,
-                    width: 12,
-                    child: _ShowDesktopButton(),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
-        ),
+          // The glass remains clipped to the bar. Its foreground can paint a
+          // jump above it without enlarging the work area or pointer region.
+          FadeTransition(
+            opacity: ShellSurfacePresentation.opacityOf(context),
+            child: Material(
+              type: MaterialType.transparency,
+              child: FocusTraversalGroup(
+                child: Stack(
+                  fit: StackFit.expand,
+                  clipBehavior: Clip.none,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 4, 12, 4),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          // Keep controls reachable on narrow outputs and with large text.
+                          final clockWidth =
+                              (106 * MediaQuery.textScalerOf(context).scale(1))
+                                  .clamp(106.0, 190.0);
+                          final networkWidth = networkSpeedIndicatorWidth(
+                            context,
+                          );
+                          final stripWidth = (clockWidth + networkWidth + 304)
+                              .clamp(constraints.maxWidth, double.infinity);
+                          return TaskbarIconViewport(
+                            child: SingleChildScrollView(
+                              clipBehavior: Clip.none,
+                              scrollDirection: Axis.horizontal,
+                              child: SizedBox(
+                                width: stripWidth,
+                                height: constraints.maxHeight,
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: WindowButtons(
+                                        monitorId: monitorId,
+                                        centerX: stripWidth / 2 + 2,
+                                        launcher: const _StartButton(),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    TaskbarTray(monitorId: monitorId),
+                                    SizedBox(
+                                      width: networkWidth,
+                                      child: ControlCenterButton.network(
+                                        monitorId: monitorId,
+                                        child: const NetworkSpeedIndicator(),
+                                      ),
+                                    ),
+                                    ControlCenterButton(monitorId: monitorId),
+                                    ControlCenterButton.battery(
+                                      monitorId: monitorId,
+                                    ),
+                                    SizedBox(
+                                      width: clockWidth,
+                                      child: ControlCenterButton.clock(
+                                        monitorId: monitorId,
+                                        child: const _Clock(),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const Positioned(
+                      top: 0,
+                      bottom: 0,
+                      right: 0,
+                      width: 12,
+                      child: _ShowDesktopButton(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

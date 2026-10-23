@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:denial_flutter_sdk/input.dart';
 import 'package:denial_flutter_sdk/state.dart';
+import 'package:denial_flutter_sdk/settings.dart';
 
 import 'window_activation.dart';
 
@@ -18,6 +19,9 @@ import 'window_groups.dart';
 import 'taskbar_settings.dart';
 import 'neutral_color.dart';
 import 'preview_emphasis.dart';
+import 'launch_icon_bounce.dart';
+import 'taskbar_icon_viewport.dart';
+import 'application_launch_wait.dart';
 
 const _instanceUnderlineOffset = 4.0;
 const _instanceHighlightOffset = 3.0;
@@ -175,6 +179,7 @@ class _WindowButtonsState extends ConsumerState<WindowButtons> {
                   : 'Could not read taskbar preferences.')
             : null);
     final buttons = ReorderableListView.builder(
+      clipBehavior: Clip.none,
       scrollDirection: Axis.horizontal,
       padding: EdgeInsets.zero,
       itemExtent: 52,
@@ -209,6 +214,7 @@ class _WindowButtonsState extends ConsumerState<WindowButtons> {
               appId: appId,
               name: app?.name ?? pin?.name ?? windows.first.title,
               launchId: app?.id ?? pin?.id,
+              matchesApplication: (id) => _keyFor(_groupIdentity(id)) == key,
               monitorId: widget.monitorId,
               windows: windows,
               pinned: pin != null,
@@ -273,7 +279,7 @@ class _WindowButtonsState extends ConsumerState<WindowButtons> {
                           ),
                         if (_keys.isNotEmpty) ...[
                           const SizedBox(width: 8),
-                          Expanded(child: buttons),
+                          Expanded(child: TaskbarIconViewport(child: buttons)),
                         ],
                       ],
                     ),
@@ -299,6 +305,7 @@ class _WindowButton extends ConsumerStatefulWidget {
     required this.appId,
     required this.name,
     required this.launchId,
+    required this.matchesApplication,
     required this.monitorId,
     required this.windows,
     required this.pinned,
@@ -311,6 +318,7 @@ class _WindowButton extends ConsumerStatefulWidget {
   final String appId;
   final String name;
   final String? launchId;
+  final bool Function(String appId) matchesApplication;
   final int monitorId;
   final List<ApplicationWindow> windows;
   final bool pinned;
@@ -373,7 +381,8 @@ class _WindowButtonState extends ConsumerState<_WindowButton>
 
   Timer? _timer;
   bool _menu = false;
-  bool _launching = false;
+  final _launch = ApplicationLaunchWait();
+  Timer? _launchTimeout;
   String? _launchError;
 
   bool get _reduceMotion => MediaQuery.disableAnimationsOf(context);
@@ -448,7 +457,7 @@ class _WindowButtonState extends ConsumerState<_WindowButton>
   }
 
   Future<void> _activate() async {
-    if (widget.dragging || _launching) return;
+    if (widget.dragging || _launch.dispatching) return;
     final services = ShellServicesScope.of(context);
     if (widget.windows.isEmpty) {
       await _launchNewWindow();
@@ -470,14 +479,30 @@ class _WindowButtonState extends ConsumerState<_WindowButton>
   }
 
   Future<void> _launchNewWindow() async {
-    if (widget.dragging || _launching) return;
+    if (widget.dragging || _launch.busy) return;
     final services = ShellServicesScope.of(context);
     final id = widget.launchId;
     if (id == null) return;
+    final request = _launch.begin(
+      ref
+          .read(shellControllerProvider)
+          .openAppWindows
+          .where((window) => widget.matchesApplication(window.appId))
+          .map((window) => window.objectId),
+    );
+    if (request == null) return;
     _hideImmediately();
     setState(() {
-      _launching = true;
       _launchError = null;
+    });
+    _launchTimeout?.cancel();
+    _launchTimeout = Timer(ApplicationLaunchWait.timeout, () {
+      if (!mounted || !_launch.expire(request)) return;
+      setState(() {
+        _launchError = Localizations.localeOf(context).languageCode == 'zh'
+            ? '未检测到新的应用窗口，可重试。'
+            : 'No new application window was detected. You can try again.';
+      });
     });
     var started = false;
     try {
@@ -489,8 +514,23 @@ class _WindowButtonState extends ConsumerState<_WindowButton>
       /* Report through the menu. */
     }
     if (!mounted) return;
+    // A fast application can publish its window before the dispatch returns
+    // or before this button has rebuilt to subscribe to the shared snapshot.
+    _launch.observeWindows(
+      ref
+          .read(shellControllerProvider)
+          .openAppWindows
+          .where((window) => widget.matchesApplication(window.appId))
+          .map((window) => window.objectId),
+    );
+    if (!_launch.waitingForWindow) _launchTimeout?.cancel();
+    final accepted = _launch.dispatched(request, started: started);
+    if (!accepted) {
+      setState(() {});
+      return;
+    }
+    if (!started) _launchTimeout?.cancel();
     setState(() {
-      _launching = false;
       if (!started) {
         _launchError = Localizations.localeOf(context).languageCode == 'zh'
             ? '无法打开此应用。'
@@ -536,6 +576,7 @@ class _WindowButtonState extends ConsumerState<_WindowButton>
   void dispose() {
     _emphasis.dispose();
     _timer?.cancel();
+    _launchTimeout?.cancel();
     _animation.dispose();
     _focus.dispose();
     super.dispose();
@@ -543,10 +584,25 @@ class _WindowButtonState extends ConsumerState<_WindowButton>
 
   @override
   Widget build(BuildContext context) {
+    if (_launch.waitingForWindow) {
+      // Unlike taskbar groups this public snapshot spans monitors/workspaces,
+      // so an application's chosen output does not leave its icon bouncing.
+      final windows = ref.watch(
+        shellControllerProvider.select((state) => state.openAppWindows),
+      );
+      if (_launch.observeWindows(
+        windows
+            .where((window) => widget.matchesApplication(window.appId))
+            .map((window) => window.objectId),
+      )) {
+        _launchTimeout?.cancel();
+      }
+    }
     final services = ShellServicesScope.of(context);
     final colors = Theme.of(context).colorScheme;
     final active = widget.windows.any((window) => window.active);
     final instanceLayers = math.min(2, widget.windows.length);
+    final animations = ref.watch(shellSettingsProvider).animations;
     return OverlayPortal.overlayChildLayoutBuilder(
       controller: _portal,
       overlayChildBuilder: (context, layout) =>
@@ -610,9 +666,16 @@ class _WindowButtonState extends ConsumerState<_WindowButton>
                         child: Padding(
                           padding: const EdgeInsets.all(8),
                           child: ExcludeSemantics(
-                            child: services.buildApplicationIcon(
-                              context,
-                              widget.appId,
+                            child: LaunchIconBounce(
+                              request: _launch.request,
+                              waitingForWindow: _launch.waitingForWindow,
+                              durationScale: animations.durationScale,
+                              panelTravel: animations.panelTravel,
+                              enabled: !widget.dragging,
+                              child: services.buildApplicationIcon(
+                                context,
+                                widget.appId,
+                              ),
                             ),
                           ),
                         ),
@@ -764,7 +827,7 @@ class _WindowButtonState extends ConsumerState<_WindowButton>
                                 foregroundColor: taskbarForeground(context),
                                 alignment: Alignment.centerLeft,
                               ),
-                              onPressed: widget.launchId == null || _launching
+                              onPressed: widget.launchId == null || _launch.busy
                                   ? null
                                   : () => unawaited(_launchNewWindow()),
                               icon: const Icon(Icons.add_rounded, size: 18),
