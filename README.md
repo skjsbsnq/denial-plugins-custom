@@ -36,6 +36,7 @@ Desk Canvas 与 App Shelf 为个人插件命名，分别选择、互不依赖，
 │   ├── desk_canvas/                # 桌面图标与真实文件
 │   └── app_shelf/                  # 独立应用启动器
 ├── docs/DEVELOPMENT.md             # 本机 SDK、编译工具和检查准备
+├── docs/PERF-HANDOVER.md           # 性能问题排查交接（进行中）
 ├── tools/check_desktop_integration.dart # 两插件的无界面文件交互检查
 ├── plugins.yaml                    # 本集合的插件来源索引
 └── upstream/                       # 可选的本地参考副本，不上传 Git
