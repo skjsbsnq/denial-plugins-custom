@@ -163,6 +163,42 @@ void main() {
     },
   );
 
+  testWidgets('unchanged desktop reuses its icon widgets on surface rebuild', (
+    tester,
+  ) async {
+    final actions = _Actions();
+    final overrides = [shellSettingsProvider.overrideWith(_Settings.new)];
+    Widget surface() => ProviderScope(
+      overrides: overrides,
+      child: ShellTheme(
+        data: const ShellThemeData(),
+        child: MaterialApp(
+          home: DesktopCanvas(
+            services: _Services(),
+            monitorId: 1,
+            bounds: const Rect.fromLTWH(0, 0, 800, 600),
+            createStore: (changed) => _Store(changed, actions),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(surface());
+    await tester.pumpAndSettle();
+    final first = tester.widget<DesktopHighlight>(
+      find.byType(DesktopHighlight),
+    );
+    // The host rebuilds every surface when the scene structure changes; an
+    // unchanged desktop must hand back the same icon widgets so element update
+    // skips them instead of rebuilding one wrapper chain per frame.
+    await tester.pumpWidget(surface());
+    await tester.pump();
+    final rebuilt = tester.widget<DesktopHighlight>(
+      find.byType(DesktopHighlight),
+    );
+    expect(identical(first, rebuilt), isTrue);
+  });
+
   testWidgets(
     'synthetic enter with an old delta cannot restore cleared hover',
     (tester) async {

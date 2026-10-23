@@ -66,6 +66,9 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
   double layoutIconSize = 0;
   String? _renderedError;
   bool _renderedLoading = true;
+  int _layoutRevision = 0;
+  Object? _iconSignature;
+  List<Widget>? _iconWidgets;
   final icons = <String, String?>{};
   final pendingIcons = <String>{};
   final tileContents =
@@ -621,6 +624,46 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
     child: const Icon(Icons.shortcut, size: 9, color: Color(0xFF1B1B1F)),
   );
 
+  bool get hoverEnabled => menuPosition == null && dialogTitle == null && !busy;
+
+  /// The host rebuilds every surface whenever the scene structure changes, and
+  /// a repaint boundary isolates painting only, not rebuilding. Returning the
+  /// same widget instances for an unchanged grid lets element update skip the
+  /// whole icon subtree, so a window drag or resize does not rebuild every
+  /// icon wrapper — and its theme subscription — once per frame.
+  List<Widget> iconTiles(
+    ShellThemeData theme, {
+    Iterable<DesktopItem>? visible,
+    bool scrolled = false,
+  }) {
+    final items = visible ?? store.items;
+    final range = scrolled
+        ? Object.hash(
+            items.length,
+            items.firstOrNull?.key,
+            items.lastOrNull?.key,
+          )
+        : null;
+    final signature = Object.hash(
+      identityHashCode(theme),
+      identityHashCode(store.items),
+      _layoutRevision,
+      Object.hashAllUnordered(selected),
+      dragKey,
+      feedbackEpoch,
+      store.iconSize,
+      area,
+      hoverEnabled,
+      scrolled,
+      range,
+    );
+    if (signature == _iconSignature && _iconWidgets != null) {
+      return _iconWidgets!;
+    }
+    _iconSignature = signature;
+    return _iconWidgets = [for (final item in items) tile(item, theme)];
+  }
+
   Widget tile(DesktopItem item, ShellThemeData theme) {
     final rect = itemRect(item.key);
     final isSelected = selected.contains(item.key);
@@ -692,8 +735,7 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
                   theme: theme,
                   selected: isSelected,
                   feedbackEpoch: feedbackEpoch,
-                  hoverEnabled:
-                      menuPosition == null && dialogTitle == null && !busy,
+                  hoverEnabled: hoverEnabled,
                   child: tileContent(item, theme),
                 ),
               ),
@@ -1336,6 +1378,7 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
               rows,
             );
             viewportIndex = DesktopViewportIndex(store.items, layout);
+            _layoutRevision++;
             layoutItems = store.items;
             final changed = layout.entries.any(
               (entry) => store.positions[entry.key] != entry.value,
@@ -1420,7 +1463,7 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
                     ),
                   ),
                 if (extraColumns <= columns)
-                  ...store.items.map((i) => tile(i, theme))
+                  ...iconTiles(theme)
                 else
                   Positioned.fill(
                     child: SingleChildScrollView(
@@ -1444,8 +1487,11 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
                             child: Stack(
                               children: [
                                 background(scrolled: true),
-                                for (final item in visibleItems)
-                                  tile(item, theme),
+                                ...iconTiles(
+                                  theme,
+                                  visible: visibleItems,
+                                  scrolled: true,
+                                ),
                               ],
                             ),
                           );
