@@ -22,7 +22,7 @@ XDG 配置变化后不继续显示旧目录；旧项目在打开、删除和重�
 
 `.desktop` 仅读取 `[Desktop Entry]`，本地化 Name 优先完整地区再语言，应用动作不会覆盖主名称。应用入口须为 `Type=Application` 且有 Exec 或 D-Bus 激活。显示名称由 `displayName` 统一产生：有可用 Name 时使用它；没有时去掉 `.desktop` 后缀，与 Windows 隐藏实现后缀的行为一致。普通文件和目录保持原文件名；以 `.desktop` 结尾的文件夹仍是文件夹。
 
-`desktop_sdk_adapter.dart` 在 isolate 使用公开 `DesktopAppsRepository.resolveIconPath`，缓存主题图标解析结果。完整共享应用目录来自 SDK `homeGridControllerProvider`，插件不扫描所有应用目录或创建额外轮询。桌面副本仅在原文件名与有界读取内容完全一致时使用宿主启动，尊重 opaque 应用身份。特殊激活与外部入口集中委托 `GioFileActions`，不执行 shell 或自行解析 Exec。
+`desktop_sdk_adapter.dart` 在 isolate 使用公开 `DesktopAppsRepository.resolveIconPath`，解析结果按图标名在进程内长期缓存，新名称串行成批处理，不再每次目录事件新建一个冷缓存 isolate。已安装应用目录只在打开快捷方式时按需读取一次，并在桌面项目变化后失效；本轮不再读取 SDK `homeGridControllerProvider`，因为该非 autoDispose 控制器会为剩余会话保留应用目录 watcher、周期重扫和完整应用列表。插件仍不创建额外轮询。桌面副本仅在原文件名与有界读取内容完全一致时使用宿主启动，尊重 opaque 应用身份。特殊激活与外部入口集中委托 `GioFileActions`，不执行 shell 或自行解析 Exec。
 
 新建目录使用真实桌面路径；重命名经 `renameat2` 的 no-replace 标志，不把 exists 检查当作防覆盖保证。移动图标仅写布局 JSON，文件不移动。删除需要确认并使用 `gio trash`；不能移入回收站时报告失败，不退化为永久删除。外部 `.desktop` 运行需每次确认，不能把来自 App Shelf 以外的任意文件默认视为可信程序。
 
@@ -57,3 +57,13 @@ App Shelf 与此插件通过真实 `.desktop` 文件及目录事件协作，不�
 选择框由 ValueNotifier + CustomPainter 绘制，指针帧只在选择集合变化时触发画布更新；候选先按列索引过滤。`moveDesktopItems` 使用 Set 与单向空位游标，纯 Dart 随机对照验证与原策略一致。`DesktopRefreshQueue` 将扫描中新增请求统一并入下一轮，各调用在覆盖其请求的扫描后完成；错误不污染后续请求，卸载取消尚未开始的请求。监听取消先快照、清原列表，再 await，避免刷新与卸载同时迭代造成异常。
 
 新增临时目录队列回归与假存储/假服务控件回归。匹配套件仍没有 `flutter_tester`，控件断言尚未执行；静态分析、算法与文件回归不能替代桌面视觉和帧率验证。
+
+## 第三轮：失效范围与常驻开销
+
+宿主挂载 surface 时只包了 `ClipRect`，没有绘制边界，所以图标层的任何一次重绘都会冒泡到整帧场景（含壁纸）。入口现在在最外层包一层 `RepaintBoundary`，把桌面自身的重绘限制在工作区内。全屏窗口覆盖工作区时，桌面层不再保持可见合成，只有概览或“显示桌面”需要时才绘制。
+
+托管菜单的重建曾由画布的每次 `setState` 触发：拖动、框选、选择变化都会重新创建 `BackdropFilter` 与抗锯齿裁剪。现在只有菜单实际绘制的内容（目标项、选择数量、位置、标题、提示、忙碌状态、图标档位与隐藏项开关）变化时才递增重建版本，其余更新不再触碰这层滤镜。
+
+`changed()` 在列表身份、错误与加载状态都未变化时直接返回，避免一次无差异的目录重扫重建全部图标控件。图标名解析结果在进程内缓存并串行成批，不再为每批新名称新建冷缓存 isolate；已安装应用目录改为打开快捷方式时按需在 isolate 读取一次，桌面项目变化后失效。
+
+`HighlightPainter` 复用同一个插值动画实例，并按当前装饰值比较是否需要重绘；此前每次重建都会被视为新画笔而重画装饰。上述改动只调整失效范围与缓存，不改变材质、阴影、字体、圆角、图标档位和动画参数。真实帧率与显存占用未在本机测量。

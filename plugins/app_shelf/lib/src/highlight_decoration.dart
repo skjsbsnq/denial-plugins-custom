@@ -21,6 +21,12 @@ class HighlightDecoration extends ImplicitlyAnimatedWidget {
 class _HighlightDecorationState
     extends ImplicitlyAnimatedWidgetState<HighlightDecoration> {
   DecorationTween? _decoration;
+
+  /// Keeping one evaluated animation means a rebuild of the surrounding row no
+  /// longer looks like a changed painter, so the decoration is not repainted
+  /// for a colour that did not move.
+  late Animation<Decoration> _evaluated;
+
   @override
   void forEachTween(TweenVisitor<dynamic> visitor) {
     _decoration = visitor(
@@ -28,14 +34,12 @@ class _HighlightDecorationState
       widget.decoration,
       (dynamic value) => DecorationTween(begin: value as Decoration),
     ) as DecorationTween?;
+    _evaluated = _decoration!.animate(animation);
   }
 
   @override
   Widget build(BuildContext context) => CustomPaint(
-    painter: HighlightPainter(
-      _decoration!.animate(animation),
-      Directionality.of(context),
-    ),
+    painter: HighlightPainter(_evaluated, Directionality.of(context)),
     child: widget.child,
   );
 }
@@ -61,8 +65,9 @@ class HighlightPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(HighlightPainter oldDelegate) =>
-      oldDelegate.decoration != decoration ||
-      oldDelegate.textDirection != textDirection;
+      !identical(oldDelegate.decoration, decoration) ||
+      oldDelegate.textDirection != textDirection ||
+      !identical(oldDelegate.decoration.value, decoration.value);
   @override
   bool shouldRebuildSemantics(HighlightPainter oldDelegate) => false;
 }

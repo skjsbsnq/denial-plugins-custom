@@ -1,17 +1,27 @@
 # Denial 自定义插件集合
 
-这里用于开发和维护个人的 Denial 插件。每个插件放在 `plugins/` 下的独立目录中，拥有自己的包名、依赖、说明和许可证，分别安装、选择与构建。以后新增插件时，在这里增加目录和索引即可。
+个人的 [Denial](https://github.com/denialwm) 插件集合：一套中文界面、跟随宿主外观设置、可分别安装的桌面与启动器组件。
+
+每个插件放在 `plugins/` 下的独立目录中，拥有自己的包名、依赖、说明和许可证，分别安装、选择与构建；不默认依赖彼此。根目录只用于索引与公共约定，当前不是 Dart 包或 Pub workspace。
 
 ## 插件索引
 
 | 插件 | 包名 | 说明 |
 | --- | --- | --- |
-| [Custom Taskbar](plugins/denial_taskbar_custom/README.md) | `denial_taskbar_custom` | 自定义任务栏，包含独立控制中心、网络与蓝牙二级菜单。 |
-| [Desk Canvas](plugins/desk_canvas/README.md) | `desk_canvas` | 真实桌面文件、应用快捷方式、选择排布与文件右键菜单。 |
-| [App Shelf](plugins/app_shelf/README.md) | `app_shelf` | 独立应用启动器，支持搜索、最近使用与右键发送 `.desktop` 到桌面。 |
+| [Custom Taskbar](plugins/denial_taskbar_custom/README.md) | `denial_taskbar_custom` | 自定义任务栏：独立控制中心、网络与蓝牙二级菜单、时钟与统计面板。 |
+| [Desk Canvas](plugins/desk_canvas/README.md) | `desk_canvas` | 在主屏工作区显示真实桌面文件与应用快捷方式，支持拖动排布、框选、重命名和文件右键菜单。 |
+| [App Shelf](plugins/app_shelf/README.md) | `app_shelf` | 独立应用启动器：搜索、字母分组、最近使用磁贴，并可把真实 `.desktop` 发送到桌面。 |
 
 各插件的功能、配置、安装注意事项和检查命令，见对应目录的 README。
 Desk Canvas 与 App Shelf 为个人插件命名，分别选择、互不依赖，通过真实桌面目录中的 `.desktop` 文件协作。安装、构建与激活分别进行，仓库内容更新不会自动替换本机现用插件。
+
+## 实现取向
+
+三个插件都以宿主 `ShellTheme`、动画时长倍率和 `MediaQuery.disableAnimations` 为准，不复制 Windows 或 Material 的固定颜色、字体与曲线，也不整体缩放文字来制造动画。
+
+渲染与后台开销遵循同一套约定：绘制失效范围尽量收在本插件自己的边界内，悬停只过渡背景并要求真实指针位移，滚动与菜单更新只重建受影响的部分；文件系统使用事件流而不是轮询，图标名解析与已安装应用目录按需读取并有界缓存，不在后台保留 watcher 或周期扫描。桌面层在全屏窗口覆盖工作区时停止合成。
+
+桌面与实际帧率、显存占用需要在本机观察；静态分析和无界面回归不能替代这一确认。细节见各插件 README 与 `docs/ARCHITECTURE.md`。
 
 项目开发与代理协作约定见 [AGENTS.md](AGENTS.md)。
 

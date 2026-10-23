@@ -64,6 +64,8 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
   late DesktopViewportIndex viewportIndex;
   List<DesktopItem>? layoutItems;
   double layoutIconSize = 0;
+  String? _renderedError;
+  bool _renderedLoading = true;
   final icons = <String, String?>{};
   final pendingIcons = <String>{};
   final tileContents =
@@ -82,12 +84,32 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
   ShellPopupHandle? popup;
   ShellPopupController? popupController;
   bool popupScheduled = false;
+  Object? _popupSignature;
+
+  /// The managed popup mirrors canvas state, but it also owns a backdrop blur
+  /// and an anti-aliased clip. Rebuilding it for every drag or selection frame
+  /// re-created those GPU-expensive layers while the menu stayed unchanged, so
+  /// only a change in what the menu actually draws bumps the revision.
   @override
   void setState(VoidCallback fn) {
     super.setState(fn);
-    if (popup != null || menuPosition != null || dialogTitle != null) {
-      popupRevision.value++;
+    if (popup == null && menuPosition == null && dialogTitle == null) {
+      _popupSignature = null;
+      return;
     }
+    final signature = Object.hash(
+      menuItem,
+      selected.length,
+      menuPosition,
+      dialogTitle,
+      message,
+      busy,
+      store.iconSize,
+      store.showHidden,
+    );
+    if (signature == _popupSignature) return;
+    _popupSignature = signature;
+    popupRevision.value++;
   }
 
   void syncPopup() {
@@ -257,16 +279,15 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
     });
   }
 
-  List<DesktopApp> get installedApps =>
-      ref
-          .read(homeGridControllerProvider)
-          .value
-          ?.slots
-          .whereType<HomeGridItem>()
-          .map((i) => i.app)
-          .whereType<DesktopApp>()
-          .toList() ??
-      [];
+  /// Installed entries are only consulted when a shortcut is opened. Reading
+  /// the home grid controller here used to instantiate it for the whole
+  /// session, which keeps application-directory watchers and a periodic
+  /// application rescan alive even when the launcher never shows that grid.
+  Future<List<DesktopApp>> get installedApps =>
+      _installedApps ??= loadInstalledApplications();
+
+  Future<List<DesktopApp>>? _installedApps;
+
   void resolveIcons() {
     final missing = store.items
         .map((i) => i.entry?.fields['Icon'])
@@ -307,16 +328,27 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
   void initState() {
     super.initState();
     void changed() {
-      if (mounted) {
-        if (!identical(layoutItems, store.items)) {
-          layoutDirty = true;
-          final keys = store.items.map((i) => i.key).toSet();
-          tileContents.removeWhere((key, _) => !keys.contains(key));
-          selected.removeWhere((key) => !keys.contains(key));
-          resolveIcons();
-        }
-        setState(() {});
+      if (!mounted) return;
+      final itemsChanged = !identical(layoutItems, store.items);
+      if (itemsChanged) {
+        layoutDirty = true;
+        final keys = store.items.map((i) => i.key).toSet();
+        tileContents.removeWhere((key, _) => !keys.contains(key));
+        selected.removeWhere((key) => !keys.contains(key));
+        // A shortcut may have appeared, vanished or been replaced.
+        _installedApps = null;
+        resolveIcons();
       }
+      // Every desktop event repaints the whole icon tree. A rescan that reused
+      // every item and changed nothing visible must not rebuild it.
+      if (!itemsChanged &&
+          store.error == _renderedError &&
+          store.loading == _renderedLoading) {
+        return;
+      }
+      _renderedError = store.error;
+      _renderedLoading = store.loading;
+      setState(() {});
     }
 
     store =
@@ -399,7 +431,7 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
           await store.actions.open(item);
           return;
         }
-        final app = await installedEntry(item, installedApps);
+        final app = await installedEntry(item, await installedApps);
         if (!mounted) return;
         if (app != null) {
           if (item.entry?.fields['DBusActivatable'] == 'true' ||
@@ -705,6 +737,9 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
           SizedBox(
             width: store.iconSize,
             height: store.iconSize,
+            // AppIconImage decodes at the size this tile actually paints.
+            // DeferredAppIcon would also pre-cache a second copy at its own
+            // fixed size, which doubles icon textures for no visual gain here.
             child: item.shortcut
                 ? Stack(
                     children: [

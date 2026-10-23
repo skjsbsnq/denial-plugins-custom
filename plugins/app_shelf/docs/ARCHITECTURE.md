@@ -6,7 +6,7 @@
 
 界面按 Windows 10 开始菜单的导航栏、字母列表、磁贴区组织：48 px 导航栏、36 px 行高的惰性列表、右侧最近使用／应用速览磁贴，以及底部搜索框。小于 580 px 或搜索时收起磁贴。列表含固定高度的分组标题，键盘只选择应用，通过 `applicationRows` 把应用索引映射到实际滚动行，菜单键定位同样使用该映射。最近使用磁贴不是持久化固定磁贴；没有增加未接入宿主的电源或账户按钮。
 
-`ApplicationIndex` 在应用列表身份、最近列表身份或查询变化时重算，悬停不参与筛选排序。`LauncherHighlight` 只持有自己的 hover，动画背景与前景分开绘制，边框没有布局内边距；`Motion.pill`、宿主 `durationScale` 和系统关闭动画设置决定反馈时长。文字样式由 `ShellTextTheme.base` 派生，不回退到打包的 Material 默认字体。
+`ApplicationIndex` 在应用列表身份、最近列表身份或查询变化时重算，悬停不参与筛选排序。`LauncherHighlight` 只持有自己的 hover，动画背景与前景分开绘制，边框没有布局内边距；`Motion.pill`、宿主 `durationScale` 和系统关闭动画设置决定反馈时长。悬停还要求真实指针位移：`MouseTracker` 可能在列表滚动后用一个携带旧 delta 的合成进入事件点亮刚滑到指针下的行，因此进入事件只登记，需要 `PointerHoverEvent` 的实际移动才恢复反馈；可见性变化递增反馈代次并复位所有行的 hover。文字样式由 `ShellTextTheme.base` 派生，不回退到打包的 Material 默认字体。
 
 面板材质对齐官方 `denial_launcher`：`DecoratedBox` 画 `panelColor(panelBackground)`、`BorderRadius.circular(theme.panelRadius)` 和 `hairline` 描边，内部只放透明 `Material` 供按钮使用，不再自行叠加 `ShellBackdropBlur`。启动器由宿主作为独立窗口合成，桌面背景和玻璃模糊由合成器提供；客户端 `BackdropFilter` 与这套合成叠加时，其取到的背景只覆盖窗口的一部分，`BlendMode.src` 会把其余区域替换成黑色，最终出现“一半壁纸、一半纯黑”的硬边。委托给合成器后，面板保持主题透明度且整块一致，也省掉了一次全屏背景滤镜。文字、搜索框、选中色和圆角分别取 `ShellTextTheme`、`cardColor(surfaceContainerHigh)`、强调色角色和 `panelRadius`。
 
@@ -46,6 +46,12 @@
 
 `LauncherScrollController` 用公开 `ScrollPositionWithSingleContext`、`BallisticScrollActivity` 和指针信号 resolver 实现。外侧 `Listener` 记录设备类型，滚动控件原有的 resolver 仍决定谁消费事件；鼠标滚轮分支由临界阻尼 `ScrollMotion` 驱动，不抢夺原生拖动、触控板 pan/zoom、滚动条或外层边缘处理。连续输入累加目标，反向从当前位置设新目标并继承当前速度；新尺寸重新约束模拟，菜单／隐藏停止当前活动。键盘使用待完成目标计算可见性，防止快速反向时旧活动把选择带出视口。完成时落在精确目标，不对文字或图标整体缩放。
 
-`RetainedLauncherEntry` 使用有界 `EntryRetention` 租约及 Flutter 自动 keep-alive，保留 SDK 图标加载器状态；回收离屏租约安排在帧后，避免布局过程中修改 keep-alive 父数据。列表 96、磁贴 12 的预算只限制离屏保留，不移除可见项目。纯 Dart 回归验证租约替换与迟到释放不会误删新实例；控件回归覆盖指针输入、改向、运行中卸载和短程回滚后加载器仍存活，但本机缺少匹配 `flutter_tester`，尚未执行控件断言。
+`RetainedLauncherEntry` 使用有界 `EntryRetention` 租约及 Flutter 自动 keep-alive，保留 SDK 图标加载器状态；回收离屏租约安排在帧后，避免布局过程中修改 keep-alive 父数据。列表 32、磁贴 8 的预算只限制离屏保留，不移除可见项目：足以覆盖短程回滚，又不会让上百个离屏行及其图标引用常驻。纯 Dart 回归验证租约替换与迟到释放不会误删新实例；控件回归覆盖指针输入、改向、运行中卸载和短程回滚后加载器仍存活，但本机缺少匹配 `flutter_tester`，尚未执行控件断言。
 
 源码对比确认：控制中心／电池面板共用阻尼 `PanelMotion` + `ControlCenterReveal`，启动器由宿主 `DesktopPanelTransition` 包裹，打开使用线性平移或按锚点淡入，关闭使用宿主另一条曲线。公开 launcher 上下文没有过渡控制接口，本插件不能独立移除或替换父层动画，也不叠加另一套开合控制器。完整统一属于宿主接口／宿主实现改动；本轮外层动画保持现状。
+
+## 悬停开销与菜单局部更新
+
+列表每次掠过一行都会启动一次 `Motion.pill` 过渡，所以滚动或横扫时同时运行的动画数取决于指针下经过了几个入口；本轮不改时长与曲线，只减掉两类非必要工作。菜单的指针/键盘选中原先存放在页面状态里，鼠标在菜单两项之间移动会重建整个面板（列表、磁贴、搜索框以及带大阴影的 `Material`）；现在选中值改为独立 `ValueNotifier`，只有菜单内容在 `ValueListenableBuilder` 内重建，阴影与裁剪不重新记录。
+
+`HighlightPainter` 复用同一个插值动画实例，并按当前装饰值比较是否需要重绘，因此所在行因其它原因重建时不会无条件重画装饰。悬停进入需要有真实移动，可见性变化会复位全部入口的 hover。列表与磁贴的 keep-alive 预算收紧到 32 与 8，保留的是短程回滚所需的加载器状态。材质、阴影、字体、圆角、动画时长与曲线均未改变；显存与帧率仍需在桌面上实测。

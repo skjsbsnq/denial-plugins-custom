@@ -41,8 +41,10 @@ class _AppShelfViewState extends ConsumerState<AppShelfView> {
         animationsDisabled: () => MediaQuery.disableAnimationsOf(context),
       );
   final _writer = ShortcutWriter();
-  final _rowRetention = EntryRetention(96);
-  final _tileRetention = EntryRetention(12);
+  // Bounded scroll-back: enough rows for a couple of viewports, without
+  // pinning scores of offscreen entries and their icon references.
+  final _rowRetention = EntryRetention(32);
+  final _tileRetention = EntryRetention(8);
   final _menuFocus = FocusNode(debugLabel: 'App Shelf menu');
   final _gridFocus = FocusNode(debugLabel: 'App Shelf list');
   final _listAnchor = GlobalKey(debugLabel: 'App Shelf rows');
@@ -53,7 +55,10 @@ class _AppShelfViewState extends ConsumerState<AppShelfView> {
   Timer? _noticeTimer;
   bool _busy = false;
   int _selected = 0;
-  int _menuChoice = 0;
+
+  /// Pointer and keyboard menu selection rebuild only the menu rows, not the
+  /// whole panel with its list, tiles and shadowed Material.
+  final _menuChoice = ValueNotifier<int>(0);
   int _generation = 0;
   LauncherContext get launcher => widget.launcher;
   bool get chinese => Localizations.localeOf(context).languageCode == 'zh';
@@ -96,6 +101,7 @@ class _AppShelfViewState extends ConsumerState<AppShelfView> {
     _tileScroll.dispose();
     _menuFocus.dispose();
     _gridFocus.dispose();
+    _menuChoice.dispose();
     super.dispose();
   }
 
@@ -174,9 +180,9 @@ class _AppShelfViewState extends ConsumerState<AppShelfView> {
   void _openMenuAt(String id, Offset local) {
     _scroll.stop();
     _tileScroll.stop();
+    _menuChoice.value = 0;
     setState(() {
       _menuId = id;
-      _menuChoice = 0;
       _menuCanSend = _source(id) != null;
       _menuPosition = local;
     });
@@ -258,13 +264,13 @@ class _AppShelfViewState extends ConsumerState<AppShelfView> {
       if (key == LogicalKeyboardKey.arrowDown ||
           key == LogicalKeyboardKey.arrowUp) {
         final count = _menuCanSend ? 2 : 1;
-        setState(() => _menuChoice = (_menuChoice + 1) % count);
+        _menuChoice.value = (_menuChoice.value + 1) % count;
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.enter ||
           key == LogicalKeyboardKey.numpadEnter) {
         final id = _menuId!;
-        if (_menuChoice == 0) {
+        if (_menuChoice.value == 0) {
           _launch(id);
         } else if (_menuCanSend) {
           unawaited(_send(id));
@@ -483,6 +489,8 @@ class _AppShelfViewState extends ConsumerState<AppShelfView> {
           child: LauncherHighlight(
             theme: shell,
             selected: isSelected,
+            feedbackEpoch: _generation,
+            hoverEnabled: launcher.visible,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
@@ -553,15 +561,15 @@ class _AppShelfViewState extends ConsumerState<AppShelfView> {
     required VoidCallback onTap,
     String? subtitle,
   }) {
-    final selected = _menuChoice == index;
+    final selected = _menuChoice.value == index;
     final color = enabled
         ? shell.colors.textPrimary
         : shell.colors.textTertiary;
     return MouseRegion(
       cursor: enabled ? launcher.linkCursor : SystemMouseCursors.basic,
       onEnter: (_) {
-        if (enabled && _menuChoice != index) {
-          setState(() => _menuChoice = index);
+        if (enabled && _menuChoice.value != index) {
+          _menuChoice.value = index;
         }
       },
       child: GestureDetector(
@@ -656,33 +664,36 @@ class _AppShelfViewState extends ConsumerState<AppShelfView> {
           clipBehavior: Clip.antiAlias,
           child: Padding(
             padding: const EdgeInsets.all(4),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _menuItem(
-                  shell,
-                  index: 0,
-                  icon: Icons.open_in_new,
-                  label: tr('打开', 'Open'),
-                  enabled: true,
-                  onTap: () => _launch(app.id),
-                ),
-                _menuItem(
-                  shell,
-                  index: 1,
-                  icon: Icons.desktop_windows_outlined,
-                  label: tr('发送快捷方式到桌面', 'Send shortcut to desktop'),
-                  subtitle: _menuCanSend
-                      ? null
-                      : tr(
-                          '此应用没有可用的 .desktop 入口',
-                          'No desktop entry available',
-                        ),
-                  enabled: !_busy && _menuCanSend,
-                  onTap: () => unawaited(_send(app.id)),
-                ),
-              ],
+            child: ValueListenableBuilder<int>(
+              valueListenable: _menuChoice,
+              builder: (context, _, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _menuItem(
+                    shell,
+                    index: 0,
+                    icon: Icons.open_in_new,
+                    label: tr('打开', 'Open'),
+                    enabled: true,
+                    onTap: () => _launch(app.id),
+                  ),
+                  _menuItem(
+                    shell,
+                    index: 1,
+                    icon: Icons.desktop_windows_outlined,
+                    label: tr('发送快捷方式到桌面', 'Send shortcut to desktop'),
+                    subtitle: _menuCanSend
+                        ? null
+                        : tr(
+                            '此应用没有可用的 .desktop 入口',
+                            'No desktop entry available',
+                          ),
+                    enabled: !_busy && _menuCanSend,
+                    onTap: () => unawaited(_send(app.id)),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -818,6 +829,8 @@ class _AppShelfViewState extends ConsumerState<AppShelfView> {
                               _openMenu(app.id, d.globalPosition),
                           child: LauncherHighlight(
                             theme: shell,
+                            feedbackEpoch: _generation,
+                            hoverEnabled: launcher.visible,
                             idleColor: shell.accentPalette.primary.withValues(
                               alpha: 0.10,
                             ),

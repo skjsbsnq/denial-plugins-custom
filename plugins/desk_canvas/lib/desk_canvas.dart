@@ -25,18 +25,25 @@ final class DeskCanvasPlugin implements ShellSurface {
 
     return ShellSurfacePlacement(
       bounds: environment.workArea,
+      // A fullscreen window covers the whole work area, so the icon plane has
+      // nothing to contribute until the desktop itself is requested.
       visible:
           !environment.locked &&
           !environment.wallpaperSelectorVisible &&
-          !environment.overview,
+          !environment.overview &&
+          (!environment.fullscreen || environment.desktopVisible),
     );
   }
 
   @override
   Widget build(BuildContext context, {required ShellSurfaceContext surface}) =>
-      DesktopCanvas(
-        services: surface.services,
-        bounds: surface.environment.workArea,
-        monitorId: surface.environment.output.monitorId,
+      // Surfaces are mounted without a repaint boundary, so an icon-level
+      // repaint would otherwise invalidate the whole scene, wallpaper included.
+      RepaintBoundary(
+        child: DesktopCanvas(
+          services: surface.services,
+          bounds: surface.environment.workArea,
+          monitorId: surface.environment.output.monitorId,
+        ),
       );
 }
