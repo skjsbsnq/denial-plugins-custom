@@ -69,6 +69,8 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
   int _layoutRevision = 0;
   Object? _iconSignature;
   List<Widget>? _iconWidgets;
+  Object? _surfaceSignature;
+  Widget? _surface;
   final icons = <String, String?>{};
   final pendingIcons = <String>{};
   final tileContents =
@@ -614,12 +616,9 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
       color: Colors.white,
       borderRadius: BorderRadius.circular(2),
       border: Border.all(
-        color: Colors.black.withValues(alpha: 0.3),
-        width: 0.6,
+        color: Colors.black.withValues(alpha: 0.35),
+        width: 0.7,
       ),
-      boxShadow: [
-        BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 2),
-      ],
     ),
     child: const Icon(Icons.shortcut, size: 9, color: Color(0xFF1B1B1F)),
   );
@@ -806,19 +805,18 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
+              // One blurred shadow instead of two: every text shadow is its
+              // own blurred render pass, and the desktop layer is redrawn on
+              // every window move. Labels stay legible on the wallpaper.
               style: theme.text.base.copyWith(
                 fontSize: 12.5,
                 height: 1.15,
                 color: Colors.white,
                 shadows: [
                   Shadow(
-                    color: Colors.black.withValues(alpha: 0.85),
-                    blurRadius: 3,
+                    color: Colors.black.withValues(alpha: 0.8),
+                    blurRadius: 3.5,
                     offset: const Offset(0, 1),
-                  ),
-                  Shadow(
-                    color: Colors.black.withValues(alpha: 0.45),
-                    blurRadius: 7,
                   ),
                 ],
               ),
@@ -1397,7 +1395,30 @@ class _DesktopCanvasState extends ConsumerState<DesktopCanvas> {
             }
           }
           final extraColumns = viewportIndex.columnCount;
-          return Focus(
+          // A host scene rebuild recreates this widget, but nothing here has to
+          // change with it. Reusing the recorded subtree keeps the canvas at
+          // one hash per rebuild instead of rebuilding the focus node, stack,
+          // background gestures and overlays.
+          final signature = Object.hash(
+            identityHashCode(theme),
+            identityHashCode(store.items),
+            _layoutRevision,
+            Object.hashAllUnordered(selected),
+            dragKey,
+            feedbackEpoch,
+            store.iconSize,
+            area,
+            hoverEnabled,
+            store.loading,
+            store.error,
+            message,
+            extraColumns <= columns,
+          );
+          if (signature == _surfaceSignature && _surface != null) {
+            return _surface!;
+          }
+          _surfaceSignature = signature;
+          return _surface = Focus(
             focusNode: focus,
             onKeyEvent: key,
             child: Stack(
