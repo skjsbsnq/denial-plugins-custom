@@ -22,6 +22,7 @@ import 'preview_emphasis.dart';
 import 'launch_icon_bounce.dart';
 import 'taskbar_icon_viewport.dart';
 import 'application_launch_wait.dart';
+import 'application_identity_index.dart';
 
 const _instanceUnderlineOffset = 4.0;
 const _instanceHighlightOffset = 3.0;
@@ -48,38 +49,18 @@ class _WindowButtonsState extends ConsumerState<WindowButtons> {
     appOf: (window) => _groupIdentity(window.appId),
   );
   final _order = TaskbarOrder();
-  List<LaunchableApplication> _catalog = [];
-  List<PinnedApplication> _pinnedApps = [];
+  final _identities = ApplicationIdentityIndex<LaunchableApplication>(
+    idOf: (app) => app.id,
+    appIdOf: (app) => app.appId,
+    aliasesOf: (app) => app.windowAppIds,
+  );
   List<String> _keys = [];
   VoidCallback? _dismissVisible;
   bool _dragging = false;
   bool _saving = false;
   String? _error;
 
-  LaunchableApplication? _applicationFor(String appId) {
-    final id = normalizeApplicationId(appId);
-    // Prefer exact desktop identities before executable/class aliases, which
-    // can be shared by unrelated applications.
-    for (final app in _catalog) {
-      if (normalizeApplicationId(app.appId) == id) return app;
-    }
-    final matches = _catalog.where(
-      (app) =>
-          app.windowAppIds.any((alias) => normalizeApplicationId(alias) == id),
-    );
-    return matches.length == 1 ? matches.single : null;
-  }
-
-  String _groupIdentity(String appId) {
-    final app = _applicationFor(appId);
-    if (app != null) return app.id;
-    for (final pin in _pinnedApps) {
-      if (normalizeApplicationId(pin.appId) == normalizeApplicationId(appId)) {
-        return pin.id;
-      }
-    }
-    return appId;
-  }
+  String _groupIdentity(String appId) => _identities.groupIdentity(appId);
 
   void _show(VoidCallback dismiss) {
     _dismissVisible?.call();
@@ -161,10 +142,10 @@ class _WindowButtonsState extends ConsumerState<WindowButtons> {
   @override
   Widget build(BuildContext context) {
     final services = ShellServicesScope.of(context);
-    _catalog = ref.watch(services.applications);
+    final catalog = ref.watch(services.applications);
     final prefsState = ref.watch(taskbarPreferencesProvider);
     final prefs = prefsState.value ?? const TaskbarPreferences();
-    _pinnedApps = prefs.pinned;
+    _identities.update(catalog, prefs.pinned);
     final groups = _groups.update(
       ref.watch(services.windows(widget.monitorId)),
     );
@@ -202,7 +183,7 @@ class _WindowButtonsState extends ConsumerState<WindowButtons> {
         final key = _keys[index];
         final windows = groups[key] ?? const <ApplicationWindow>[];
         final pin = pins[key];
-        final app = _catalog.where((app) => _keyFor(app.id) == key).firstOrNull;
+        final app = _identities.applicationForGroup(key);
         final appId = app?.appId ?? pin?.appId ?? windows.first.appId;
         return ReorderableDragStartListener(
           key: ValueKey(key),

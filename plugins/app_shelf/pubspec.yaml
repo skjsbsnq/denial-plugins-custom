@@ -1,0 +1,24 @@
+name: app_shelf
+description: Personal application launcher with desktop shortcuts.
+publish_to: none
+version: 0.0.0
+environment:
+  sdk: ^3.13.0
+  flutter: 3.47.5
+dependencies:
+  denial_sdk: '0.0.0'
+  denial_flutter_sdk: '0.0.0'
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^3.3.2
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+denial_plugin:
+  schema: 1
+  name: App Shelf
+  provides:
+    - contract: package:denial_flutter_sdk/launcher.dart#ShellLauncher
+    - contract: package:denial_flutter_sdk/actions.dart#ShellAction

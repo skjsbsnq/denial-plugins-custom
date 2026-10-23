@@ -7,8 +7,11 @@
 | 插件 | 包名 | 说明 |
 | --- | --- | --- |
 | [Custom Taskbar](plugins/denial_taskbar_custom/README.md) | `denial_taskbar_custom` | 自定义任务栏，包含独立控制中心、网络与蓝牙二级菜单。 |
+| [Desk Canvas](plugins/desk_canvas/README.md) | `desk_canvas` | 真实桌面文件、应用快捷方式、选择排布与文件右键菜单。 |
+| [App Shelf](plugins/app_shelf/README.md) | `app_shelf` | 独立应用启动器，支持搜索、最近使用与右键发送 `.desktop` 到桌面。 |
 
 各插件的功能、配置、安装注意事项和检查命令，见对应目录的 README。
+Desk Canvas 与 App Shelf 为个人插件命名，分别选择、互不依赖，通过真实桌面目录中的 `.desktop` 文件协作。安装、构建与激活分别进行，仓库内容更新不会自动替换本机现用插件。
 
 项目开发与代理协作约定见 [AGENTS.md](AGENTS.md)。
 
@@ -19,12 +22,11 @@
 ├── README.md                       # 集合说明与插件索引
 ├── AGENTS.md                       # 开发与代理协作约定
 ├── plugins/
-│   └── denial_taskbar_custom/       # 一个可独立选择的插件包
-│       ├── README.md
-│       ├── pubspec.yaml
-│       ├── LICENSE
-│       ├── lib/
-│       └── test/
+│   ├── denial_taskbar_custom/       # 现有自定义任务栏
+│   ├── desk_canvas/                # 桌面图标与真实文件
+│   └── app_shelf/                  # 独立应用启动器
+├── docs/DEVELOPMENT.md             # 本机 SDK、编译工具和检查准备
+├── tools/check_desktop_integration.dart # 两插件的无界面文件交互检查
 ├── plugins.yaml                    # 本集合的插件来源索引
 └── upstream/                       # 可选的本地参考副本，不上传 Git
 ```
@@ -81,8 +83,12 @@ denial-plugins build CANDIDATE_ID
 
 本机 SDK 路径通过 `pubspec_overrides.yaml` 配置，该文件已忽略，不应作为分发依赖提交。详细开发流程可参考[上游开发说明](https://github.com/denialwm/denial-plugins/blob/4b7adf998852b09b9a91c1cfab48be58debf2e80/docs/DEVELOPMENT.md)，并以当前安装的 Denial SDK 和工具要求为准。`upstream/` 仅用于可选的本地参考，Git 仓库不包含该副本。
 
+新插件的本机准备与检查变量见[集合开发准备说明](docs/DEVELOPMENT.md)。
+
 ## 来源与许可证
 
 当前任务栏基于 [denialwm/denial-plugins](https://github.com/denialwm/denial-plugins) 的官方 `denial_taskbar` 复制，具体来源提交和许可证见其[插件说明](plugins/denial_taskbar_custom/README.md)。
+
+Desk Canvas 与 App Shelf 为本集合独立实现的个人插件，使用公开 SDK；各自维护功能、设计说明与许可证。
 
 各插件保留各自的来源、版权及许可证要求。当前任务栏按 GPL-3.0-or-later 分发，保留上游版权；Stats 参考部分的 MIT 许可见插件内的 `third_party/stats-LICENSE`。GPL 全文见 [LICENSES/GPL-3.0-only.txt](LICENSES/GPL-3.0-only.txt)。新增或复制插件时，应在对应目录记录这些信息。

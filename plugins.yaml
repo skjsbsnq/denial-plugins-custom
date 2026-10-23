@@ -2,3 +2,7 @@ schema: 1
 plugins:
   - git: https://github.com/skjsbsnq/denial-plugins-custom.git
     path: plugins/denial_taskbar_custom
+  - git: https://github.com/skjsbsnq/denial-plugins-custom.git
+    path: plugins/desk_canvas
+  - git: https://github.com/skjsbsnq/denial-plugins-custom.git
+    path: plugins/app_shelf

@@ -407,6 +407,10 @@ class _ControlCenterPanelState extends ConsumerState<_ControlCenterPanel>
   Rect _menuTarget = Rect.zero;
   final _scroll = ScrollController();
   final _volume = VolumePresentation();
+  final _volumeReadout = ValueNotifier<({double? level, bool readFailed})>((
+    level: null,
+    readFailed: false,
+  ));
   StreamSubscription<AudioLevelState>? _audioSubscription;
   Timer? _volumeReconciliation;
   bool _volumeReadFailed = false;
@@ -417,10 +421,9 @@ class _ControlCenterPanelState extends ConsumerState<_ControlCenterPanel>
     final audio = ref.read(audioServiceProvider);
     _audioSubscription = audio.states.listen((state) {
       if (!mounted) return;
-      setState(() {
-        _volume.nativeState(state.level, isMuted: state.muted);
-        _volumeReadFailed = false;
-      });
+      _volume.nativeState(state.level, isMuted: state.muted);
+      _volumeReadFailed = false;
+      _publishVolume();
       if (!_volume.needsReconciliation) _volumeReconciliation?.cancel();
     });
     scheduleMicrotask(_readVolume);
@@ -433,13 +436,24 @@ class _ControlCenterPanelState extends ConsumerState<_ControlCenterPanel>
     try {
       final value = await audio.readLevel();
       if (!mounted) return;
-      setState(() {
-        _volume.completeRead(token, value);
-        _volumeReadFailed = _volume.level == null && value == null;
-      });
+      _volume.completeRead(token, value);
+      _volumeReadFailed = _volume.level == null && value == null;
+      _publishVolume();
     } on Object {
-      if (mounted) setState(() => _volumeReadFailed = _volume.level == null);
+      if (mounted) {
+        _volumeReadFailed = _volume.level == null;
+        _publishVolume();
+      }
     }
+  }
+
+  void _publishVolume() {
+    // Equal readouts (including ignored stale/native drag replies) do not
+    // notify. Only the title, slider and read error observe these changes.
+    _volumeReadout.value = (
+      level: _volume.level,
+      readFailed: _volumeReadFailed,
+    );
   }
 
   void _beginVolume(ShellServices services) {
@@ -449,12 +463,14 @@ class _ControlCenterPanelState extends ConsumerState<_ControlCenterPanel>
   }
 
   void _setVolume(ShellServices services, double value) {
-    setState(() => _volume.intent(value));
+    _volume.intent(value);
+    _publishVolume();
     services.setVolume(value);
   }
 
   void _commitVolume(ShellServices services, double value) {
-    setState(() => _volume.commit(value));
+    _volume.commit(value);
+    _publishVolume();
     services.commitVolume(value);
     _volumeReconciliation?.cancel();
     _volumeReconciliation = Timer(const Duration(seconds: 2), () {
@@ -468,6 +484,7 @@ class _ControlCenterPanelState extends ConsumerState<_ControlCenterPanel>
   void dispose() {
     unawaited(_audioSubscription?.cancel());
     _volumeReconciliation?.cancel();
+    _volumeReadout.dispose();
     _menuMotion.dispose();
     _menuExpansion.dispose();
     _wifiDetailsFocus.dispose();
@@ -561,7 +578,6 @@ class _ControlCenterPanelState extends ConsumerState<_ControlCenterPanel>
     final colors = Theme.of(context).colorScheme;
     final chinese = Localizations.localeOf(context).languageCode == 'zh';
     String label(String zh, String en) => chinese ? zh : en;
-    final volume = _volume.level;
     final audio = ref.watch(audioDevicesProvider);
     final network = ref.watch(networkConnectivityProvider);
     final bluetooth = ref.watch(bluetoothProvider);
@@ -674,67 +690,89 @@ class _ControlCenterPanelState extends ConsumerState<_ControlCenterPanel>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              _SectionTitle(
-                                title: label('声音', 'Sound'),
-                                value: volume == null
-                                    ? '—'
-                                    : '${(volume * 100).round()} %',
-                              ),
-                              Row(
-                                children: [
-                                  Icon(
-                                    volume == 0
-                                        ? Icons.volume_off_rounded
-                                        : Icons.volume_up_rounded,
-                                  ),
-                                  Expanded(
-                                    child: Slider(
-                                      value: volume ?? 0,
-                                      label: volume == null
-                                          ? null
-                                          : '${(volume * 100).round()} %',
-                                      semanticFormatterCallback: (value) =>
-                                          '${(value * 100).round()} %',
-                                      onChangeStart: volume == null
-                                          ? null
-                                          : (_) => _beginVolume(services),
-                                      onChanged: volume == null
-                                          ? null
-                                          : (value) =>
-                                                _setVolume(services, value),
-                                      onChangeEnd: volume == null
-                                          ? null
-                                          : (value) =>
-                                                _commitVolume(services, value),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (volume == null)
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        _volumeReadFailed
-                                            ? label(
-                                                '无法读取音量',
-                                                'Unable to read volume',
-                                              )
-                                            : label(
-                                                '正在读取音量…',
-                                                'Reading volume…',
+                              ValueListenableBuilder<
+                                ({double? level, bool readFailed})
+                              >(
+                                valueListenable: _volumeReadout,
+                                builder: (context, readout, _) {
+                                  final volume = readout.level;
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      _SectionTitle(
+                                        title: label('声音', 'Sound'),
+                                        value: volume == null
+                                            ? '—'
+                                            : '${(volume * 100).round()} %',
+                                      ),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            volume == 0
+                                                ? Icons.volume_off_rounded
+                                                : Icons.volume_up_rounded,
+                                          ),
+                                          Expanded(
+                                            child: Slider(
+                                              value: volume ?? 0,
+                                              label: volume == null
+                                                  ? null
+                                                  : '${(volume * 100).round()} %',
+                                              semanticFormatterCallback: (
+                                                value,
+                                              ) => '${(value * 100).round()} %',
+                                              onChangeStart: volume == null
+                                                  ? null
+                                                  : (_) =>
+                                                        _beginVolume(services),
+                                              onChanged: volume == null
+                                                  ? null
+                                                  : (value) => _setVolume(
+                                                      services,
+                                                      value,
+                                                    ),
+                                              onChangeEnd: volume == null
+                                                  ? null
+                                                  : (value) => _commitVolume(
+                                                      services,
+                                                      value,
+                                                    ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (volume == null)
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                readout.readFailed
+                                                    ? label(
+                                                        '无法读取音量',
+                                                        'Unable to read volume',
+                                                      )
+                                                    : label(
+                                                        '正在读取音量…',
+                                                        'Reading volume…',
+                                                      ),
                                               ),
-                                      ),
-                                    ),
-                                    if (_volumeReadFailed)
-                                      IconButton(
-                                        tooltip: label('重试', 'Retry'),
-                                        onPressed: () =>
-                                            unawaited(_readVolume()),
-                                        icon: const Icon(Icons.refresh_rounded),
-                                      ),
-                                  ],
-                                ),
+                                            ),
+                                            if (readout.readFailed)
+                                              IconButton(
+                                                tooltip: label('重试', 'Retry'),
+                                                onPressed: () =>
+                                                    unawaited(_readVolume()),
+                                                icon: const Icon(
+                                                  Icons.refresh_rounded,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                    ],
+                                  );
+                                },
+                              ),
                               ExpansionTile(
                                 tilePadding: EdgeInsets.zero,
                                 shape: const Border(),
